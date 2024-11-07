@@ -19,6 +19,8 @@ var (
 	ErrNoRequest     = errors.New("No http request provided")
 	ErrInvalidMethod = errors.New("Invalid http method")
 
+	staticDir = "./"
+
 	Methods = map[string]struct{}{
 		"GET":    struct{}{},
 		"POST":   struct{}{},
@@ -27,10 +29,18 @@ var (
 	}
 )
 
-var _ = net.Listen
-var _ = os.Exit
-
 func main() {
+	for i, arg := range os.Args {
+		if arg == "--directory" {
+			if i == len(os.Args)-1 {
+				log.Println("Missing directory param")
+				os.Exit(1)
+			}
+			staticDir = strings.TrimRight(os.Args[i+1], "/")
+			break
+		}
+	}
+
 	log.Println("Logs from your program will appear here!")
 
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
@@ -46,6 +56,8 @@ func main() {
 		go HandleConn(conn)
 	}
 }
+
+// TODO: implements handlers as a Trie
 
 func HandleConn(c net.Conn) error {
 	defer c.Close()
@@ -103,6 +115,26 @@ func HandleConn(c net.Conn) error {
 		}
 		w.Flush()
 
+	} else if strings.HasPrefix(request[1], "/files/") {
+		log.Println("Requested static file")
+		filename, _ := strings.CutPrefix(request[1], "/files/")
+		if len(filename) == 0 {
+			fmt.Fprintf(c, "HTTP/1.1 404 Not Found\r\n\r\n")
+		}
+		filepath := fmt.Sprintf("%s/%s", staticDir, filename)
+		content, err := os.ReadFile(filepath)
+		if err != nil {
+			log.Println("File not found")
+			fmt.Fprintf(c, "HTTP/1.1 404 Not Found\r\n\r\n")
+		}
+		log.Println("File found")
+
+		w := bufio.NewWriter(c)
+		w.WriteString("HTTP/1.1 200 OK\r\n")
+		w.WriteString("Content-Type: application/octet-stream\r\n")
+		w.WriteString(fmt.Sprintf("Content-Length: %d\r\n\r\n", len(content)))
+		w.Write(content)
+		w.Flush()
 	} else {
 		log.Println("Requested not found")
 		fmt.Fprintf(c, "HTTP/1.1 404 Not Found\r\n\r\n")
