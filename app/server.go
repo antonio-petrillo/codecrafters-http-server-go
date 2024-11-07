@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -29,25 +31,25 @@ var _ = net.Listen
 var _ = os.Exit
 
 func main() {
-	fmt.Println("Logs from your program will appear here!")
+	log.Println("Logs from your program will appear here!")
 
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
-		fmt.Println("Failed to bind to port 4221")
+		log.Println("Failed to bind to port 4221")
 		os.Exit(1)
 	}
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			fmt.Println("Error accepting connection: ", err.Error())
+			log.Println("Error accepting connection: ", err.Error())
 		}
-		fmt.Println("Conn established")
 		go HandleConn(conn)
 	}
 }
 
 func HandleConn(c net.Conn) error {
 	defer c.Close()
+	log.Println("New Connection handling")
 
 	buffer := make([]byte, BUFF_SIZE)
 	nread, err := c.Read(buffer)
@@ -62,17 +64,27 @@ func HandleConn(c net.Conn) error {
 	lines[0] = strings.TrimSpace(lines[0])
 
 	request := strings.Fields(lines[0])
-	// fmt.Println(request[0])
-	// fmt.Println(request[1])
-	// fmt.Println(request[2])
 
 	if _, ok := Methods[request[0]]; !ok {
 		return ErrInvalidMethod
 	}
 
 	if request[1] == "/" {
+		log.Println("Requested root \"/\"")
 		fmt.Fprintf(c, "HTTP/1.1 200 OK\r\n\r\n")
+	} else if strings.HasPrefix(request[1], "/echo/") {
+		echo, _ := strings.CutPrefix(request[1], "/echo/")
+		log.Printf("Requested echo /echo/%s", echo)
+
+		w := bufio.NewWriter(c)
+		w.WriteString("HTTP/1.1 200 OK\r\n")
+		w.WriteString("Content-Type: text/plain\r\n")
+		w.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(echo)))
+		w.WriteString(fmt.Sprintf("\r\n%s", echo))
+		w.Flush()
+
 	} else {
+		log.Println("Requested not found")
 		fmt.Fprintf(c, "HTTP/1.1 404 Not Found\r\n\r\n")
 	}
 
