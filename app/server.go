@@ -83,6 +83,26 @@ func HandleConn(c net.Conn) error {
 		w.WriteString(fmt.Sprintf("\r\n%s", echo))
 		w.Flush()
 
+	} else if request[1] == "/user-agent" {
+		log.Printf("Requested /user-agent")
+		w := bufio.NewWriter(c)
+		w.WriteString("HTTP/1.1 200 OK\r\n")
+		w.WriteString("Content-Type: text/plain\r\n")
+		userAgent := ""
+		for _, line := range lines[1:] {
+			log.Println(line)
+			if strings.HasPrefix(line, "User-Agent:") {
+				userAgent, _ = strings.CutPrefix(line, "User-Agent:")
+				userAgent = strings.TrimSpace(userAgent)
+				break
+			}
+		}
+		if userAgent != "" {
+			w.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(userAgent)))
+			w.WriteString(fmt.Sprintf("\r\n%s", userAgent))
+		}
+		w.Flush()
+
 	} else {
 		log.Println("Requested not found")
 		fmt.Fprintf(c, "HTTP/1.1 404 Not Found\r\n\r\n")
