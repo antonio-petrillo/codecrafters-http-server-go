@@ -31,6 +31,10 @@ var (
 		"PUT":    struct{}{},
 		"DELETE": struct{}{},
 	}
+
+	SupportedEncoding = map[string]struct{}{
+		"gzip": struct{}{},
+	}
 )
 
 type Request struct {
@@ -98,18 +102,26 @@ func ParseRequest(raw []byte) (*Request, error) {
 	}, nil
 }
 
-func SendResponse(w io.Writer, status int, headers map[string]string, contentLength int, body []byte) {
+func SendResponse(w io.Writer, req *Request, status int, headers map[string]string, contentLength int, body []byte) {
 	wb := bufio.NewWriter(w)
 	msg := getStatusMessage(status)
 	fmt.Fprintf(wb, "HTTP/1.1 %d %s\r\n", status, msg) // HTTP/1.1 200 OK\r\n
 	for k, v := range headers {
 		fmt.Fprintf(wb, "%s: %s\r\n", k, v) // i.e. Content-Type: text/plain\r\n
 	}
+
+	if enc, ok := req.Headers["Accept-Encoding"]; ok {
+		if _, validEncoding := SupportedEncoding[enc]; validEncoding {
+			fmt.Fprintf(wb, "Content-Encoding: %s\r\n\r\n", enc)
+		}
+	}
+
 	if contentLength > 0 {
 		fmt.Fprintf(wb, "Content-Length: %d\r\n\r\n", contentLength)
 	} else {
 		fmt.Fprintf(wb, "\r\n")
 	}
+
 	wb.Write(body[0:contentLength])
 	wb.Flush()
 }
@@ -147,7 +159,7 @@ func HandleConn(c net.Conn) {
 	req, err := ParseRequest(buffer)
 	if err != nil {
 		log.Println(err.Error())
-		SendResponse(c, 400, make(map[string]string), 0, []byte{})
+		SendResponse(c, req, 400, make(map[string]string), 0, []byte{})
 		return
 	}
 
@@ -155,14 +167,14 @@ func HandleConn(c net.Conn) {
 	log.Printf("Requested %q %s", req.Method, path)
 
 	if path == "/" {
-		SendResponse(c, 200, make(map[string]string), 0, []byte{})
+		SendResponse(c, req, 200, make(map[string]string), 0, []byte{})
 	} else if strings.HasPrefix(path, "/echo/") {
 		echo, _ := strings.CutPrefix(path, "/echo/")
 		binEcho := []byte(echo)
 		headers := map[string]string{
 			"Content-Type": "text/plain",
 		}
-		SendResponse(c, 200, headers, len(binEcho), binEcho)
+		SendResponse(c, req, 200, headers, len(binEcho), binEcho)
 	} else if strings.HasPrefix(path, "/user-agent") {
 		headers := map[string]string{
 			"Content-Type": "text/plain",
@@ -171,46 +183,46 @@ func HandleConn(c net.Conn) {
 		if ua, ok := req.Headers["User-Agent"]; ok {
 			binUa = []byte(ua)
 		}
-		SendResponse(c, 200, headers, len(binUa), binUa)
+		SendResponse(c, req, 200, headers, len(binUa), binUa)
 	} else if strings.HasPrefix(path, "/files/") {
 		filename, _ := strings.CutPrefix(path, "/files/")
 		if len(filename) == 0 {
-			SendResponse(c, 404, make(map[string]string), 0, []byte{})
+			SendResponse(c, req, 404, make(map[string]string), 0, []byte{})
 		}
 		switch req.Method {
 		case "GET":
-			SendResponseFileGet(c, filename)
+			SendResponseFileGet(c, req, filename)
 		case "POST":
-			SendResponseFilePost(c, filename, req)
+			SendResponseFilePost(c, req, filename)
 		default:
-			SendResponse(c, 405, make(map[string]string), 0, []byte{})
+			SendResponse(c, req, 405, make(map[string]string), 0, []byte{})
 		}
 	} else {
-		SendResponse(c, 404, map[string]string{}, 0, []byte{})
+		SendResponse(c, req, 404, map[string]string{}, 0, []byte{})
 	}
 }
 
-func SendResponseFilePost(c net.Conn, filename string, req *Request) {
+func SendResponseFilePost(c net.Conn, req *Request, filename string) {
 	filepath := fmt.Sprintf("%s/%s", staticDir, filename)
 	file, err := os.OpenFile(filepath, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		SendResponse(c, 500, map[string]string{}, 0, []byte{})
+		SendResponse(c, req, 500, map[string]string{}, 0, []byte{})
 		return
 	}
 	file.Write(req.Body[0:req.ContentLength])
 	file.Close()
-	SendResponse(c, 201, map[string]string{}, 0, []byte{})
+	SendResponse(c, req, 201, map[string]string{}, 0, []byte{})
 }
 
-func SendResponseFileGet(c net.Conn, filename string) {
+func SendResponseFileGet(c net.Conn, req *Request, filename string) {
 	filepath := fmt.Sprintf("%s/%s", staticDir, filename)
 	content, err := os.ReadFile(filepath)
 	if err != nil {
-		SendResponse(c, 404, map[string]string{}, 0, []byte{})
+		SendResponse(c, req, 404, map[string]string{}, 0, []byte{})
 		return
 	}
 	headers := map[string]string{
 		"Content-Type": "application/octet-stream",
 	}
-	SendResponse(c, 200, headers, len(content), content)
+	SendResponse(c, req, 200, headers, len(content), content)
 }
