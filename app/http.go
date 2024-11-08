@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
@@ -110,22 +112,39 @@ func SendResponse(w io.Writer, req *Request, status int, headers map[string]stri
 		fmt.Fprintf(wb, "%s: %s\r\n", k, v) // i.e. Content-Type: text/plain\r\n
 	}
 
+	typeOfEncoding := ""
 	if encodings, ok := req.Headers["Accept-Encoding"]; ok {
 		for _, enc := range strings.FieldsFunc(encodings, func(c rune) bool { return c == ',' }) {
-			if _, validEncoding := SupportedEncoding[strings.TrimSpace(enc)]; validEncoding {
-				fmt.Fprintf(wb, "Content-Encoding: %s\r\n\r\n", enc)
+			trim := strings.TrimSpace(enc)
+			if _, validEncoding := SupportedEncoding[trim]; validEncoding {
+				typeOfEncoding = trim
+				fmt.Fprintf(wb, "Content-Encoding: %s\r\n", enc)
 				break
 			}
 		}
 	}
 
-	if contentLength > 0 {
+	switch typeOfEncoding {
+	case "gzip":
+		buf := &bytes.Buffer{}
+		gz := gzip.NewWriter(buf)
+
+		_, err := gz.Write(body[0:contentLength])
+		// _, err := gz.Write(body)
+		gz.Close()
+
+		if err != nil {
+			log.Println("ERROR:", err.Error())
+			return
+		}
+
+		fmt.Fprintf(wb, "Content-Length: %d\r\n\r\n", len(buf.Bytes()))
+		wb.Write(buf.Bytes())
+	default:
 		fmt.Fprintf(wb, "Content-Length: %d\r\n\r\n", contentLength)
-	} else {
-		fmt.Fprintf(wb, "\r\n")
+		wb.Write(body[0:contentLength])
 	}
 
-	wb.Write(body[0:contentLength])
 	wb.Flush()
 }
 
