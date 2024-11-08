@@ -110,9 +110,12 @@ func SendResponse(w io.Writer, req *Request, status int, headers map[string]stri
 		fmt.Fprintf(wb, "%s: %s\r\n", k, v) // i.e. Content-Type: text/plain\r\n
 	}
 
-	if enc, ok := req.Headers["Accept-Encoding"]; ok {
-		if _, validEncoding := SupportedEncoding[enc]; validEncoding {
-			fmt.Fprintf(wb, "Content-Encoding: %s\r\n\r\n", enc)
+	if encodings, ok := req.Headers["Accept-Encoding"]; ok {
+		for _, enc := range strings.FieldsFunc(encodings, func(c rune) bool { return c == ',' }) {
+			if _, validEncoding := SupportedEncoding[strings.TrimSpace(enc)]; validEncoding {
+				fmt.Fprintf(wb, "Content-Encoding: %s\r\n\r\n", enc)
+				break
+			}
 		}
 	}
 
